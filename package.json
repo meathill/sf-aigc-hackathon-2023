@@ -1,0 +1,16 @@
+{
+  "name": "ttsdemo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/tts/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "alibabacloud-nls": "^1.0.3",
+    "log-timestamp": "^0.3.0"
+  }
+}
