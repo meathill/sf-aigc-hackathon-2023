@@ -28,7 +28,22 @@ const getSortParams = (params) => {
     .replaceAll(":", "%3A");
 };
 
+/**
+ * 获取文件base64编码
+ * @param string  path 文件路径
+ * @return string base64编码信息，不带文件头
+ */
+function getFileContentAsBase64(path) {
+  const { readFile } = require("fs/promises");
+  try {
+    return readFile(path, { encoding: "base64" });
+  } catch (err) {
+    throw new Error(err);
+  }
+}
+
 module.exports = {
   getMacAddress,
-  getSortParams
+  getSortParams,
+  getFileContentAsBase64,
 };

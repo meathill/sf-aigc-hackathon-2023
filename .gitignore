@@ -1,4 +1,9 @@
 .idea
 
-
 node_modules
+
+*.mp3
+*.pcm
+*.wav
+
+output.json

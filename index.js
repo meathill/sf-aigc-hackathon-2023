@@ -1,63 +1,19 @@
-const axios = require("axios");
-const fs = require("fs");
 const path = require("path");
-const { getSortParams } = require("./utils");
-
-
-// 设置语音转换所需参数
+const request = require("./request");
+const { getSortParams, getFileContentAsBase64 } = require("./utils");
+const { writeFile, stat } = require("fs/promises");
 const {
-  params,
-  getTokenParams,
+  texToSpeechParams,
+  speechToTexParams,
   API_KEY,
   SECRET_KEY,
-  CONTENT_TYPE_FORMATS,
   OUTPUT_FORMAT,
 } = require("./config");
 
-
-
-const OUTPUT_CONTENT_FORMAT = CONTENT_TYPE_FORMATS[OUTPUT_FORMAT];
-
-// 判断是否有权限
-const hasPermission = (result) => {
-  result = result || {};
-
-  const hasToken = Object.keys(result).includes("access_token");
-
-  const hasScope = Object.keys(result).includes("scope");
-
-  const existScope = result["scope"].split(" ").includes(getTokenParams.SCOPE);
-  if (hasToken && hasScope) {
-    if (!existScope) {
-      console.log("scope is not correct");
-      return;
-    }
-    return result["access_token"];
-  } else {
-    console.log("接口异常");
-  }
-};
-
-const request = {
-  getToken: (params) => {
-    return axios({
-      url: getTokenParams.TOKEN_URL + `?${params}`,
-      method: "get",
-    });
-  },
-
-  queryTexToSpeech: (params1) => {
-    return axios({
-      url: params.TTS_URL + `?${getSortParams(params1)}`,
-      method: "get",
-      headers: {
-        "Content-Type": OUTPUT_CONTENT_FORMAT,
-      },
-      responseType: "arraybuffer",
-    });
-  },
-};
-
+/**
+ * 使用 AK，SK 生成鉴权签名（Access Token）
+ * @return string 鉴权签名信息（Access Token）
+ */
 const create_token = async () => {
   console.log("fetch token begin");
 
@@ -70,48 +26,101 @@ const create_token = async () => {
   let sortParams = getSortParams(params);
   sortParams = encodeURI(sortParams);
   try {
-    const result = await request.getToken(sortParams);
-    return hasPermission(result.data) || "";
-  } catch (err) {}
-};
-
-const texToSpeech = async (token) => {
-  const tex = encodeURI(encodeURI(TEXT));
-
-  const { PER, SPD, PIT, VOL, AUE, CUID } = params;
-
-  const params1 = {
-    tok: token,
-    tex: tex,
-    per: PER,
-    spd: SPD,
-    pit: PIT,
-    vol: VOL,
-    aue: AUE,
-    cuid: CUID,
-    lan: "zh",
-    ctp: 1,
-  };
-
-  try {
-    const result = await request.queryTexToSpeech(params1);
-
-    const filePath = path.join(__dirname, `result.${OUTPUT_FORMAT}`);
-    fs.writeFileSync(filePath, result.data, {
-      encoding: "utf8",
-    });
+    const { data } = await request.getTokenAPI(sortParams);
+    if (!data) {
+      return console.log("result is empty");
+    }
+    const hasToken = Object.keys(data).includes("access_token");
+    const hasScope = Object.keys(data).includes("scope");
+    const existScope = data["scope"].split(" ").includes("audio_tts_post");
+    if (hasToken && hasScope) {
+      if (!existScope) {
+        console.log("scope is not correct");
+        return;
+      }
+      return data["access_token"];
+    } else {
+      console.log("接口异常");
+    }
   } catch (err) {
     console.log("err :>> ", err);
   }
 };
 
-const initAllParams = async () => {
-  const token = await create_token();
+const texToSpeech = async (token) => {
+  try {
+    const tex = encodeURI(encodeURI(TEXT));
 
-  const result = await texToSpeech(token);
+    const params = {
+      tex,
+      tok: token,
+      lan: "zh",
+      ctp: 1,
+      ...texToSpeechParams,
+    };
+
+    const result = await request.texToSpeechAPI(params);
+    const filePath = path.join(__dirname, `output.${OUTPUT_FORMAT}`);
+    await writeFile(filePath, result.data, {
+      encoding: "utf8",
+    });
+    console.log("写入成功");
+  } catch (err) {
+    console.log("err :>> ", err);
+  }
 };
 
+const speechToTex = async (token) => {
+  try {
+    const target = "./output.pcm";
+    const targetSuffix = target.split(".").pop(); //.txt
+    const targetSize = (await stat(target)).size;
+    const supportSpeechFormat = ["pcm", "wav", "amr", "m4a"];
+    // 支持的格式
+    if (!supportSpeechFormat.includes(targetSuffix)) {
+      console.log(
+        `语音格式不支持: ${targetSuffix},仅支持: ${supportSpeechFormat.join(
+          ","
+        )}`
+      );
+      return;
+    }
+    const params = {
+      ...speechToTexParams,
+      token,
+      // 支持的格式: pcm/wav/amr/m4a
+      format: targetSuffix,
+      len: targetSize,
+      speech: await getFileContentAsBase64(target),
+    };
+    const result = await request.speechToTexAPI(params);
+    const transformResult = JSON.parse(result.data);
+    console.log("result :>> ", transformResult);
+    if (transformResult.err_no != 0) {
+      console.log(
+        `接口请求失败: ${transformResult.err_no}, ${transformResult.err_msg}`
+      );
+      return;
+    }
+    writeFile("./output.json", JSON.stringify(transformResult, null, "\t"))
+      .then((res) => {
+        console.log("文件写入成功");
+      })
+      .catch((err) => {
+        console.log(`文件写入失败: ${err}`)
+      });
+  } catch (err) {
+    if (err.errno === -2 && err.code === "ENOENT") {
+      console.log(`${err.path}文件不存在`);
+    }
+  }
+};
 
-const TEXT = "设置语音转换所需参数";
+const TEXT = "我要结婚啦, 请恭喜我, 哈哈哈哈哈";
 
-initAllParams();
+create_token().then((token) => {
+  // 文字转语音
+  texToSpeech(token);
+  // 语音转文字
+  // speechToTex(token);
+});
